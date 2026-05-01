@@ -1,0 +1,1 @@
+{"Modules":[{"Key":"","Source":"","Dir":"."},{"Key":"eks-deployment","Source":"./module-eks","Dir":"module-eks"},{"Key":"namecheap-deployment","Source":"./module-dns","Dir":"module-dns"},{"Key":"rds-mysql-deployment","Source":"./module-database","Dir":"module-database"},{"Key":"vpc-deployment","Source":"./module-vpc","Dir":"module-vpc"}]}

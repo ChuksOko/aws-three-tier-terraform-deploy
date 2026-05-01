@@ -1,4 +1,4 @@
-variable "vpc_cidrblock" {
+ variable "vpc_cidrblock" {
   description = "CIDR block for the VPC"
   type        = string
   default     = "192.168.0.0/16"
@@ -26,7 +26,7 @@ variable "countsub" {
 }
 variable "create_elastic_ip" {
   description = "Flag to create Elastic IPs"
-  type        = bool
+  type        = bool\
   default     = true
 }
 
@@ -96,20 +96,29 @@ variable "namecheap_api_user" {
 }
 
 variable "namecheap_api_key" {
-  description = "Namecheap API key"
+  description = "Namecheap API key - set via TF_VAR_ env var or tfvars file"
   type        = string
-  default     = "a3ca57241b794d44b0fc3387ca9b62a9"  #change
+  # No default - must be supplied at runtime, never hardcoded
 }
 variable "namecheap_username" {
-  description = "Namecheap username"
+  description = "Namecheap username - set via TF_VAR_namecheap_username"
   type        = string
-  default     = "Jomek"
 }
-variable "namecheap_client_ip" {
-  description = "Client IP for Namecheap API access"
+variable "db_password" {
+  description = "RDS password - injected from AWS Secrets Manager or CI secret"
   type        = string
-  default     = "3.86.158.86" # Replace with your actual client IP
+  sensitive   = true   # Redacts value from all Terraform logs/plan output
 }
+ 
+# In GitHub Actions — store in repo secrets, not in code:
+# Settings → Secrets → TF_VAR_namecheap_api_key
+# Settings → Secrets → TF_VAR_db_password
+#
+# Then in cicd.yaml:
+# env:
+#   TF_VAR_namecheap_api_key: ${{ secrets.TF_VAR_NAMECHEAP_API_KEY }}
+#   TF_VAR_db_password: ${{ secrets.TF_VAR_DB_PASSWORD }}
+
 
 #===========
 
@@ -137,11 +146,11 @@ variable "db_username" {
   default     = "admin"
 }
 
-variable "db_password" {
-  description = "Password for the database"
-  type        = string
-  default     = "password123"
-  sensitive   = true
+#variable "db_password" {
+#  description = "Password for the database"
+#  type        = string
+#  default     = "password123"
+#  sensitive   = true
 }
 
 variable "db_name" {
