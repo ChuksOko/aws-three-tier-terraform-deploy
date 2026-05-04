@@ -21,6 +21,15 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Install Conftest
+        run: |
+          curl -L https://github.com/open-policy-agent/conftest/releases/download/v0.51.0/conftest_0.51.0_Linux_x86_64.tar.gz -o conftest.tar.gz
+          tar xzf conftest.tar.gz
+          sudo mv conftest /usr/local/bin/
+
+      - name: OPA Policy Gate
+        run: conftest test tfplan-violations.json --policy policy/security.rego
+
       - name: Configure AWS credentials via OIDC
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -48,15 +57,6 @@ jobs:
         env:
           TF_VAR_namecheap_api_key: ${{ secrets.TF_VAR_NAMECHEAP_API_KEY }}
           TF_VAR_db_password: ${{ secrets.TF_VAR_DB_PASSWORD }}
-
-      - name: Install Conftest
-        run: |
-          curl -L https://github.com/open-policy-agent/conftest/releases/download/v0.51.0/conftest_0.51.0_Linux_x86_64.tar.gz -o conftest.tar.gz
-          tar xzf conftest.tar.gz
-          sudo mv conftest /usr/local/bin/
-
-      - name: OPA Policy Gate
-        run: conftest test tfplan.json --policy policy/security.rego
 
       - name: Terraform Apply
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
