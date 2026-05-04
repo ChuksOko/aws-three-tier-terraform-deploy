@@ -1,0 +1,52 @@
+{
+  "planned_values": {
+    "root_module": {
+      "resources": [
+        {
+          "type": "aws_security_group",
+          "name": "mysql_sg",
+          "values": {
+            "ingress": [
+              {
+                "from_port": 3306,
+                "to_port": 3306,
+                "protocol": "tcp",
+                "cidr_blocks": ["192.168.0.0/16"]
+              }
+            ],
+            "egress": [
+              {
+                "from_port": 0,
+                "to_port": 0,
+                "protocol": "-1",
+                "cidr_blocks": ["0.0.0.0/0"]
+              }
+            ]
+          }
+        },
+        {
+          "type": "aws_db_instance",
+          "name": "mysql_db_instance",
+          "values": {
+            "storage_encrypted": false,
+            "deletion_protection": false,
+            "multi_az": false
+          }
+        },
+        {
+          "type": "aws_eks_cluster",
+          "name": "eks",
+          "values": {
+            "vpc_config": [
+              {
+                "endpoint_public_access": true,
+                "endpoint_private_access": true,
+                "public_access_cidrs": ["0.0.0.0/0"]
+              }
+            ]
+          }
+        }
+      ]
+    }
+  }
+}
