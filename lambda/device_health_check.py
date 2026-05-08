@@ -1,22 +1,16 @@
 """
-Zero Trust Device Health Check - Lambda Function
-=================================================
-Enforces device posture requirements before granting access
-to the banking API. Two mandatory checks:
-
-  1. Disk encryption must be enabled (BitLocker/FileVault/LUKS)
-  2. Hardware MFA token must be registered (FIDO2/YubiKey)
-
-In production this function is configured as an AWS API Gateway
-Lambda Authorizer, invoked before every request reaches the
-banking API. Device posture data comes from Cloudflare Access
-JWT claims or an endpoint agent (CrowdStrike, Jamf, Intune).
+Zero Trust Device Health Check - Lambda Authorizer
+===================================================
+This function serves dual purpose:
+  1. Standalone invocation - returns JSON decision
+  2. API Gateway Lambda Authorizer - returns IAM policy
 
 Author: Chukwuemeka Oko
 Project: aws-three-tier-terraform-deploy - Zero Trust Identity Pivot
 """
 
 import json
+import base64
 import logging
 
 logger = logging.getLogger()
@@ -25,145 +19,149 @@ logger.setLevel(logging.INFO)
 
 def lambda_handler(event, context):
     """
-    Main Lambda entry point.
-
-    Expected event payload:
-    {
-        "user_email": "developer@gmail.com",
-        "device_id": "device-uuid-here",
-        "posture": {
-            "disk_encrypted": true,
-            "hardware_mfa_registered": true,
-            "os_version": "Windows 11",
-            "last_seen": "2026-05-08T00:00:00Z"
-        }
-    }
+    Handles both direct invocation and API Gateway authorizer requests.
+    API Gateway authorizer events contain a methodArn field.
     """
-    logger.info("Device health check invoked: %s", json.dumps(event))
+    logger.info("Event received: %s", json.dumps(event))
 
-    # ------------------------------------------------------------------
-    # Step 1 - Extract and validate request payload
-    # ------------------------------------------------------------------
+    # Detect if called as API Gateway authorizer
+    if "methodArn" in event:
+        return handle_api_gateway_authorizer(event, context)
+    else:
+        return handle_direct_invocation(event, context)
+
+
+def handle_api_gateway_authorizer(event, context):
+    """
+    Handles API Gateway Lambda authorizer requests.
+    Reads device posture from X-Device-Posture header.
+    Returns IAM policy allowing or denying access.
+    """
+    method_arn = event.get("methodArn", "")
+
+    # Extract device posture from header
+    headers = event.get("headers", {}) or {}
+    posture_header = headers.get("X-Device-Posture", "") or headers.get("x-device-posture", "")
+
+    if not posture_header:
+        logger.warning("No X-Device-Posture header found - denying access")
+        return generate_policy("anonymous", "Deny", method_arn, {
+            "reason": "Missing X-Device-Posture header"
+        })
+
+    # Decode base64 posture data
+    try:
+        posture_json = base64.b64decode(posture_header).decode("utf-8")
+        posture_data = json.loads(posture_json)
+    except Exception as e:
+        logger.error("Failed to decode posture header: %s", str(e))
+        return generate_policy("anonymous", "Deny", method_arn, {
+            "reason": "Invalid X-Device-Posture header format"
+        })
+
+    user_email = posture_data.get("user_email", "unknown")
+    device_id  = posture_data.get("device_id", "unknown")
+    posture    = posture_data.get("posture", {})
+
+    # Run device health checks
+    result = run_health_checks(user_email, device_id, posture)
+
+    if result["statusCode"] == 200:
+        logger.info("ACCESS_GRANTED user=%s device=%s", user_email, device_id)
+        return generate_policy(user_email, "Allow", method_arn, {
+            "user_email": user_email,
+            "decision": "ALLOW",
+            "checks_passed": "disk_encryption,hardware_mfa"
+        })
+    else:
+        logger.warning(
+            "ACCESS_DENIED user=%s device=%s reason=%s",
+            user_email, device_id, result.get("error_code")
+        )
+        return generate_policy(user_email, "Deny", method_arn, {
+            "user_email": user_email,
+            "decision": "DENY",
+            "error_code": result.get("error_code"),
+            "reason": result.get("reason")
+        })
+
+
+def handle_direct_invocation(event, context):
+    """Handles direct Lambda invocations - returns JSON decision."""
     user_email = event.get("user_email", "").strip().lower()
     device_id  = event.get("device_id", "").strip()
     posture    = event.get("posture", {})
 
     if not user_email:
-        return deny_access(
-            user_email="unknown",
-            device_id=device_id,
-            reason="Missing user_email in request payload",
-            code="MISSING_IDENTITY"
-        )
-
+        return deny_access("unknown", device_id, "Missing user_email", "MISSING_IDENTITY")
     if not device_id:
-        return deny_access(
-            user_email=user_email,
-            device_id="unknown",
-            reason="Missing device_id in request payload",
-            code="MISSING_DEVICE_ID"
-        )
-
+        return deny_access(user_email, "unknown", "Missing device_id", "MISSING_DEVICE_ID")
     if not posture:
+        return deny_access(user_email, device_id, "Missing posture data", "MISSING_POSTURE_DATA")
+
+    return run_health_checks(user_email, device_id, posture)
+
+
+def run_health_checks(user_email, device_id, posture):
+    """Runs all device health checks and returns decision."""
+
+    # Check 1 - Disk Encryption
+    if not posture.get("disk_encrypted", False):
+        logger.warning("DEVICE_CHECK_FAILED disk_encryption user=%s device=%s", user_email, device_id)
         return deny_access(
-            user_email=user_email,
-            device_id=device_id,
-            reason="Missing posture data - endpoint agent may not be installed",
-            code="MISSING_POSTURE_DATA"
+            user_email, device_id,
+            "Device does not have disk encryption enabled. "
+            "Enable BitLocker (Windows), FileVault (Mac), or LUKS (Linux) "
+            "before accessing banking infrastructure.",
+            "DISK_ENCRYPTION_REQUIRED"
         )
 
-    # ------------------------------------------------------------------
-    # Step 2 - Check 1: Disk Encryption
-    #
-    # Mandatory for PCI-DSS and NDPR compliance.
-    # Accepted: BitLocker (Windows), FileVault (Mac), LUKS (Linux)
-    # If disk_encrypted is absent or false, access is denied.
-    # ------------------------------------------------------------------
-    disk_encrypted = posture.get("disk_encrypted", False)
+    logger.info("DEVICE_CHECK_PASSED disk_encryption user=%s device=%s", user_email, device_id)
 
-    if not disk_encrypted:
-        logger.warning(
-            "DEVICE_CHECK_FAILED disk_encryption user=%s device=%s",
-            user_email, device_id
-        )
+    # Check 2 - Hardware MFA
+    if not posture.get("hardware_mfa_registered", False):
+        logger.warning("DEVICE_CHECK_FAILED hardware_mfa user=%s device=%s", user_email, device_id)
         return deny_access(
-            user_email=user_email,
-            device_id=device_id,
-            reason=(
-                "Device does not have disk encryption enabled. "
-                "Enable BitLocker (Windows), FileVault (Mac), or LUKS (Linux) "
-                "before accessing banking infrastructure."
-            ),
-            code="DISK_ENCRYPTION_REQUIRED"
+            user_email, device_id,
+            "No hardware MFA token registered. "
+            "Register a FIDO2 hardware token (YubiKey or Google Titan Key). "
+            "Software authenticator apps are not accepted.",
+            "HARDWARE_MFA_REQUIRED"
         )
 
-    logger.info(
-        "DEVICE_CHECK_PASSED disk_encryption user=%s device=%s",
-        user_email, device_id
-    )
+    logger.info("DEVICE_CHECK_PASSED hardware_mfa user=%s device=%s", user_email, device_id)
+    logger.info("ACCESS_GRANTED all_checks_passed user=%s device=%s", user_email, device_id)
 
-    # ------------------------------------------------------------------
-    # Step 3 - Check 2: Hardware MFA Token
-    #
-    # Software TOTP apps (Google Authenticator, Authy) are NOT accepted.
-    # Only FIDO2 hardware tokens (YubiKey, Titan Key) are accepted.
-    # This check verifies the token is registered, not just that MFA
-    # is enabled - a critical distinction for high-security environments.
-    # ------------------------------------------------------------------
-    hardware_mfa_registered = posture.get("hardware_mfa_registered", False)
-
-    if not hardware_mfa_registered:
-        logger.warning(
-            "DEVICE_CHECK_FAILED hardware_mfa user=%s device=%s",
-            user_email, device_id
-        )
-        return deny_access(
-            user_email=user_email,
-            device_id=device_id,
-            reason=(
-                "No hardware MFA token registered for this user. "
-                "Register a FIDO2 hardware token (YubiKey or Google Titan Key) "
-                "at your identity provider. Software authenticator apps are not "
-                "accepted for banking infrastructure access."
-            ),
-            code="HARDWARE_MFA_REQUIRED"
-        )
-
-    logger.info(
-        "DEVICE_CHECK_PASSED hardware_mfa user=%s device=%s",
-        user_email, device_id
-    )
-
-    # ------------------------------------------------------------------
-    # Step 4 - All checks passed - approve access
-    # ------------------------------------------------------------------
-    logger.info(
-        "ACCESS_GRANTED all_checks_passed user=%s device=%s",
-        user_email, device_id
-    )
-
-    return allow_access(
-        user_email=user_email,
-        device_id=device_id,
-        posture=posture
-    )
+    return allow_access(user_email, device_id, posture)
 
 
-# ------------------------------------------------------------------
-# Helper functions
-# ------------------------------------------------------------------
+def generate_policy(principal_id, effect, method_arn, context=None):
+    """Generates an IAM policy document for API Gateway."""
+    policy = {
+        "principalId": principal_id,
+        "policyDocument": {
+            "Version": "2012-10-17",
+            "Statement": [{
+                "Action": "execute-api:Invoke",
+                "Effect": effect,
+                "Resource": method_arn
+            }]
+        }
+    }
+    if context:
+        policy["context"] = context
+    logger.info("Generated %s policy for principal=%s", effect, principal_id)
+    return policy
+
 
 def allow_access(user_email, device_id, posture):
-    """Return 200 approval with full posture summary."""
+    """Returns 200 approval response."""
     return {
         "statusCode": 200,
         "decision": "ALLOW",
         "user_email": user_email,
         "device_id": device_id,
-        "checks_passed": [
-            "disk_encryption",
-            "hardware_mfa_registered"
-        ],
+        "checks_passed": ["disk_encryption", "hardware_mfa_registered"],
         "posture_summary": {
             "disk_encrypted":          posture.get("disk_encrypted"),
             "hardware_mfa_registered": posture.get("hardware_mfa_registered"),
@@ -179,7 +177,7 @@ def allow_access(user_email, device_id, posture):
 
 
 def deny_access(user_email, device_id, reason, code):
-    """Return 403 denial with specific reason and remediation guidance."""
+    """Returns 403 denial response."""
     return {
         "statusCode": 403,
         "decision": "DENY",
