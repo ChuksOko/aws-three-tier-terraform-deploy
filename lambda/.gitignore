@@ -1,0 +1,10 @@
+﻿__pycache__/
+package/
+*.zip
+payload-*.json
+response-*.json
+valid-posture.json
+request-template.json
+response-template.json
+waf-*.json
+tfplan-clean.json
