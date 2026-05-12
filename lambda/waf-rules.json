@@ -1,0 +1,50 @@
+[
+  {
+    "Name": "AWSManagedRulesCommonRuleSet",
+    "Priority": 1,
+    "OverrideAction": {"None": {}},
+    "Statement": {
+      "ManagedRuleGroupStatement": {
+        "VendorName": "AWS",
+        "Name": "AWSManagedRulesCommonRuleSet"
+      }
+    },
+    "VisibilityConfig": {
+      "SampledRequestsEnabled": true,
+      "CloudWatchMetricsEnabled": true,
+      "MetricName": "AWSManagedRulesCommonRuleSet"
+    }
+  },
+  {
+    "Name": "AWSManagedRulesSQLiRuleSet",
+    "Priority": 2,
+    "OverrideAction": {"None": {}},
+    "Statement": {
+      "ManagedRuleGroupStatement": {
+        "VendorName": "AWS",
+        "Name": "AWSManagedRulesSQLiRuleSet"
+      }
+    },
+    "VisibilityConfig": {
+      "SampledRequestsEnabled": true,
+      "CloudWatchMetricsEnabled": true,
+      "MetricName": "AWSManagedRulesSQLiRuleSet"
+    }
+  },
+  {
+    "Name": "AWSManagedRulesKnownBadInputsRuleSet",
+    "Priority": 3,
+    "OverrideAction": {"None": {}},
+    "Statement": {
+      "ManagedRuleGroupStatement": {
+        "VendorName": "AWS",
+        "Name": "AWSManagedRulesKnownBadInputsRuleSet"
+      }
+    },
+    "VisibilityConfig": {
+      "SampledRequestsEnabled": true,
+      "CloudWatchMetricsEnabled": true,
+      "MetricName": "AWSManagedRulesKnownBadInputsRuleSet"
+    }
+  }
+]
